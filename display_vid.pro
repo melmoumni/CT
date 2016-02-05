@@ -6,8 +6,8 @@ QMAKE_LIBS += `pkg-config opencv --cflags --libs`
 
 TEMPLATE = app
 CONFIG += qt warn_on release thread
-SOURCES = display_vid.cpp
-TARGET = display_vid
+SOURCES = ct.cpp
+TARGET = ct
 CONFIG -= app_bundle
 
 INCLUDEPATH += /usr/local/include/opencv2/

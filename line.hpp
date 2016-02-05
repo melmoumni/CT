@@ -5,7 +5,6 @@
 #include <sstream>
 #include <opencv.hpp>
 
-
 enum endpoint_t {START, END};
 class Line
 {
@@ -21,7 +20,7 @@ public:
 	}
 
 	Line(cv::Point a, cv::Point b, int id_): X(a), Y(b), id(id_){
-		_name = "eaze";
+		//_name = "eaze";
 	}
 
 	cv::Point getX(void) const{
