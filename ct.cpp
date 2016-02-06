@@ -3,7 +3,7 @@
 #include "lineController.hpp"
 #include "patch.hpp"
 #include "objectdetect.hpp"
-#include "draw.hpp"
+//#include "draw.hpp"
 
 using namespace std;
 using namespace cv;
