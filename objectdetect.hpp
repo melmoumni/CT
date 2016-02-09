@@ -9,7 +9,7 @@ class DetectAndDisplay {
 public:
 	DetectAndDisplay(String s): window_name(s) {}
 	/** @function detectAndDisplay */
-	vector<Rect>& detectAndMark( Mat frame, CascadeClassifier& logo_cascade, vector<Rect>& logos )
+	void detectAndMark( Mat frame, CascadeClassifier& logo_cascade, vector<Rect>& logos )
 	{
 		Mat frame_gray;
 		Mat ROI;
@@ -17,7 +17,6 @@ public:
 		equalizeHist( frame_gray, frame_gray );	
 		//-- Detect logos
 		logo_cascade.detectMultiScale( frame_gray, logos, 1.05, 1, 0|CASCADE_SCALE_IMAGE);
-		return logos;
 	}
 	void displayObject(vector<Rect> & logos, Mat &frame) {
 		for(uint i = 0; i<logos.size(); i++){
