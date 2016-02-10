@@ -1,17 +1,13 @@
 #include <opencv2/video/background_segm.hpp>
+#include <tuple>
 #include "line.hpp"
 #include "lineController.hpp"
 #include "patch.hpp"
 #include "objectdetect.hpp"
+#include "counter.hpp"
 #include "CppMT/CMT.cpp"
-#include "CppMT/common.cpp"
-#include "CppMT/Consensus.cpp"
-#include "CppMT/gui.cpp"
-#include "CppMT/Tracker.cpp"
-#include "CppMT/Matcher.cpp"
-#include "CppMT/Fusion.cpp"
-#include "CppMT/fastcluster/fastcluster.cpp"
 
+ 
 using namespace std;
 using namespace cv;
 using namespace cmt;
@@ -19,12 +15,13 @@ using namespace cmt;
 /** Global variables **/
 LineController controller;
 //Draw on frame feature
+vector<Counter> counters;
 int click_nb = 0;
 Point X;
 Point Y;
 Point current_mouse_pos;
-bool destroy_window = false;;
-bool destroyed = false;;
+bool destroy_window = false;
+bool destroyed = false;
 Mat frame;
 //link the button id with its property (state)
 map<int, int> buttons_id;
@@ -32,42 +29,25 @@ int new_button = 0;
 String window_name = "Capture - logo atos detection";
 /** End global variables **/
 
+int display(Mat im, CMT & cmt) {
+	//Visualize the output. It is ok to draw on im itself, as CMT only uses the grayscale image
+	for(size_t i = 0; i < cmt.points_active.size(); i++)
+		circle(im, cmt.points_active[i], 2, Scalar(255,0,0));
 
-inline void drawRotatedRect(cv::Mat& image, cv::RotatedRect rRect, cv::Scalar color = cv::Scalar(255.0, 255.0, 255.0) ) {
-
-   cv::Point2f vertices2f[4];
-   cv::Point vertices[4];
-   rRect.points(vertices2f);
-   for(int i = 0; i < 4; ++i){
-     vertices[i] = vertices2f[i];
-   }
-   cv::fillConvexPoly(image, vertices, 4, color);
+	Point2f vertices[4];
+	cmt.bb_rot.points(vertices);
+	for (int i = 0; i < 4; i++)
+		line(im, vertices[i], vertices[(i+1)%4], Scalar(255,0,0));
+	imshow(window_name, im);
+	return waitKey(5);
 }
-
-int display(Mat im, CMT & cmt)
-{
-    //Visualize the output
-    //It is ok to draw on im itself, as CMT only uses the grayscale image
-    for(size_t i = 0; i < cmt.points_active.size(); i++)
-    {
-        circle(im, cmt.points_active[i], 2, Scalar(255,0,0));
-    }
-
-    Point2f vertices[4];
-    cmt.bb_rot.points(vertices);
-    for (int i = 0; i < 4; i++)
-    {
-        line(im, vertices[i], vertices[(i+1)%4], Scalar(255,0,0));
-    }
-
-    imshow(window_name, im);
-
-    return waitKey(5);
-}
-
 
 void on_change(int , void *id) {
+	int position = controller.getLinePositionById(*(int*)id);
+	if(position < 0 || position >= (int)counters.size())
+		asm("int3");
 	controller.removeLine(*(int*)id);
+	counters.erase(counters.begin()+position);
 	destroy_window = true;
 }
 	
@@ -80,6 +60,7 @@ void mouseEventCallBack(int event, int _x, int _y, int , void* ) {
 			Y.y = _y;
 			Y.x = _x;
 			controller.addLine(X,Y);
+			counters.push_back(Counter(X,Y));
 			controller.draw();
 			imshow(window_name, controller.frame());
 			int this_id = controller.getNextId() - 1;
@@ -126,15 +107,17 @@ void usage(const char *s){
 }
 
 int main(int argc, char **argv){
-	//int : lifetime of tracker (number of frames)
-	vector<pair<CMT*,int> > cmt_list;
+	/**
+	 * int : lifetime of tracker (number of frames)
+	 * Point : initial position of the CMT
+	 **/
+ 	vector< tuple<CMT*,int, Point> > cmt_list;
 	CMT* cmt;
 	CascadeClassifier logo_cascade;
 	String logo_cascade_name;
 	VideoCapture capture;
 	Mat frame;
 	const int nb_frame_threshold = 10;
-	bool oneInRange = false;
 
 	if(argc < 2) {
 		usage(argv[0]);
@@ -172,15 +155,15 @@ int main(int argc, char **argv){
 		d.detectAndMark(frame, logo_cascade, logos);
 
 		//detect and track new objects
-		for(int i= 0; i<logos.size(); i++){ 
+		for(uint i= 0; i<logos.size(); i++){ 
 			Point2f a(logos[i].x,logos[i].y);
 			bool match = true;
-			for(int j = 0; j < cmt_list.size(); j++){
-				Point2f b(cmt_list[j].first->bb_rot.center);
+			for(uint j = 0; j < cmt_list.size(); j++){
+				Point2f b(std::get<0>(cmt_list[j])->bb_rot.center);
 				double res = cv::norm(cv::Mat(a),cv::Mat(b));
 				double sizee = sqrt(logos[i].width*logos[i].width + logos[i].height*logos[i].height);
 				if(res < sizee){
-					cmt_list[j].second = nb_frame_threshold;
+					std::get<1>(cmt_list[j]) = nb_frame_threshold;
 					match = false;
 					break;
 				} 
@@ -188,49 +171,67 @@ int main(int argc, char **argv){
 			if(match || cmt_list.size() == 0) {
 				cmt = new CMT();
 				cmt->initialize(im_gray, logos[i]);
-				cmt_list.push_back(pair<CMT*,int>(cmt,nb_frame_threshold));
+				cmt_list.push_back(tuple<CMT*,int, Point>(cmt,nb_frame_threshold,cmt->bb_rot.center));
 			}
 		}
 				
 		//dont track an object that has not been detected for a long time
 		for(uint i = 0; i<cmt_list.size(); i++){
-			 Point2f b(cmt_list[i].first->bb_rot.center);
-			 for(uint j = 0; j<logos.size(); j++) {
-				 Point2f a(logos[j].x,logos[j].y);
-				 RotatedRect r = cmt_list[i].first->bb_rot;
-				 double res = cv::norm(cv::Mat(a),cv::Mat(b));
-				 double sizee = sqrt(r.size.width * r.size.width + r.size.height * r.size.height);
-				 if(res<sizee){
-					 cmt_list[i].second++;
-					 break;
-				 }
-			 }
-			 cmt_list[i].second--;
-			 if(cmt_list[i].second <= 0) {
-				 cmt_list.erase(cmt_list.begin()+i);
-				 if(i>0)
-					 --i;
-			 }
-			 for(uint j = 0; j < cmt_list.size() && j!=i; j++){
-				 Point2f a(cmt_list[j].first->bb_rot.center);
-				 RotatedRect r = cmt_list[j].first->bb_rot;
-				 double res = cv::norm(cv::Mat(a),cv::Mat(b));
-				 double sizee = sqrt(r.size.width * r.size.width + r.size.height * r.size.height);
-				 if(res<sizee){
-					 cmt_list.erase(cmt_list.begin()+j);
-					 break;
-				 }
-			 }
+			Point2f b(std::get<0>(cmt_list[i])->bb_rot.center);
+			for(uint j = 0; j<logos.size(); j++) {
+				Point2f a(logos[j].x,logos[j].y);
+				RotatedRect r = std::get<0>(cmt_list[i])->bb_rot;
+				double res = cv::norm(cv::Mat(a),cv::Mat(b));
+				double sizee = sqrt(r.size.width * r.size.width + r.size.height * r.size.height);
+				if(res<sizee){
+					std::get<1>(cmt_list[i])++;
+					break;
+				}
+			}
+			std::get<1>(cmt_list[i])--;
+			if(std::get<1>(cmt_list[i]) <= 0) {
+				cmt_list.erase(cmt_list.begin()+i);
+				if(i>0)
+					--i;
+			}
+			for(uint j = 0; j < cmt_list.size() && j!=i; j++){
+				Point2f a(std::get<0>(cmt_list[j])->bb_rot.center);
+				RotatedRect r = std::get<0>(cmt_list[j])->bb_rot;
+				double res = cv::norm(cv::Mat(a),cv::Mat(b));
+				double sizee = sqrt(r.size.width * r.size.width + r.size.height * r.size.height);
+				if(res<sizee){
+					cmt_list.erase(cmt_list.begin()+j);
+					break;
+				}
+			}
 		}
 		
 		d.displayObject(logos, frame);
-		
 		for(uint i = 0; i<cmt_list.size(); i++) {
-			cmt_list[i].first->processFrame(im_gray);
-			char key = display(frame, *(cmt_list[i].first));
+			std::get<0>(cmt_list[i])->processFrame(im_gray);
+			char key = display(frame, *(std::get<0>(cmt_list[i])));
 			if(key == 'q') break;
 		}
-		process(frame);		
+		process(frame);
+
+		vector<Point> initials;
+		vector<Point> currents;
+		for(uint i = 0; i < cmt_list.size(); i++) {
+			initials.push_back(std::get<2>(cmt_list[i]));
+			currents.push_back(std::get<0>(cmt_list[i])->bb_rot.center);
+		}
+		
+		for(uint i = 0; i < counters.size(); i++) {
+			counters[i].setInitials(initials);
+			counters[i].setCurrents(currents);
+		}
+		
+		for(uint i = 0; i < counters.size(); i++) {
+			tuple<int,int,int, vector<Point> > tmp = counters[i].getSituation();
+			putText(frame, to_string(std::get<0>(tmp)) + to_string(std::get<1>(tmp)) + to_string(std::get<2>(tmp)), Point(5,15*i+15), CV_FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255,255,0));
+			
+			imshow(window_name, frame);
+		}
 		waitKey(0);
 	}
 	return EXIT_SUCCESS;
